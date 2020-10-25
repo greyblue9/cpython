@@ -22,7 +22,8 @@
 
 MODBUILT_NAMES=    _MODBUILT_NAMES_
 MODDISABLED_NAMES= _MODDISABLED_NAMES_
-MODOBJS=           _MODOBJS_
+# filter out duplicate object files (_math.o)
+MODOBJS=           $(sort _MODOBJS_)
 MODLIBS=           _MODLIBS_
 
 # === Variables set by configure
@@ -497,6 +498,16 @@ build_all_generate_profile:
 run_profile_task:
 	@ # FIXME: can't run for a cross build
 	$(LLVM_PROF_FILE) $(RUNSHARED) ./$(BUILDPYTHON) $(PROFILE_TASK) || true
+	task="$(PROFILE_TASK)"; \
+	case "$$task" in \
+	*-s\ *) \
+	  $(LLVM_PROF_FILE) $(RUNSHARED) ./$(BUILDPYTHON) $$task; \
+	  while [ -f $(abs_builddir)/build/pynexttest ]; do \
+	    $(LLVM_PROF_FILE) $(RUNSHARED) ./$(BUILDPYTHON) $$task; \
+	  done;; \
+	*) \
+	  $(LLVM_PROF_FILE) $(RUNSHARED) ./$(BUILDPYTHON) $$task; \
+	esac
 
 build_all_merge_profile:
 	$(LLVM_PROF_MERGER)
@@ -585,8 +596,9 @@ pybuilddir.txt: $(BUILDPYTHON)
 	fi
 
 # This is shared by the math and cmath modules
+# don't build with -fPIC when building as math and cmath as builtins
 Modules/_math.o: Modules/_math.c Modules/_math.h
-	$(CC) -c $(CCSHARED) $(PY_CORE_CFLAGS) -o $@ $<
+	$(CC) -c $(if $(findstring _math.o, $(MODOBJS)),,$(CCSHARED)) $(PY_CORE_CFLAGS) -o $@ $<
 
 # blake2s is auto-generated from blake2b
 $(srcdir)/Modules/_blake2/blake2s_impl.c: $(srcdir)/Modules/_blake2/blake2b_impl.c $(srcdir)/Modules/_blake2/blake2b2s.py
@@ -746,6 +758,8 @@ Modules/getbuildinfo.o: $(PARSER_OBJS) \
 	      -DGITVERSION="\"`LC_ALL=C $(GITVERSION)`\"" \
 	      -DGITTAG="\"`LC_ALL=C $(GITTAG)`\"" \
 	      -DGITBRANCH="\"`LC_ALL=C $(GITBRANCH)`\"" \
+	      $(if $(BUILD_DATE),-DDATE='"$(BUILD_DATE)"') \
+	      $(if $(BUILD_TIME),-DTIME='"$(BUILD_TIME)"') \
 	      -o $@ $(srcdir)/Modules/getbuildinfo.c
 
 Modules/getpath.o: $(srcdir)/Modules/getpath.c Makefile
@@ -774,6 +788,7 @@ Modules/signalmodule.o: $(srcdir)/Modules/signalmodule.c $(srcdir)/Modules/posix
 
 Python/dynload_shlib.o: $(srcdir)/Python/dynload_shlib.c Makefile
 	$(CC) -c $(PY_CORE_CFLAGS) \
+		$(if $(MULTIARCH),-DMULTIARCH='"$(MULTIARCH)"') \
 		-DSOABI='"$(SOABI)"' \
 		-o $@ $(srcdir)/Python/dynload_shlib.c
 
@@ -1551,7 +1566,7 @@ inclinstall:
 LIBPL=		@LIBPL@
 
 # pkgconfig directory
-LIBPC=		$(LIBDIR)/pkgconfig
+LIBPC=		$(LIBDIR)/$(MULTIARCH)/pkgconfig
 
 libainstall:	@DEF_MAKE_RULE@ python-config
 	@for i in $(LIBDIR) $(LIBPL) $(LIBPC); \
@@ -1686,7 +1701,7 @@ frameworkinstallextras:
 	cd Mac && $(MAKE) installextras DESTDIR="$(DESTDIR)"
 
 # Build the toplevel Makefile
-Makefile.pre: $(srcdir)/Makefile.pre.in config.status
+Makefile.pre: $(srcdir)/Makefile.pre.in 
 	CONFIG_FILES=Makefile.pre CONFIG_HEADERS= $(SHELL) config.status
 	$(MAKE) -f Makefile.pre Makefile
 
@@ -1694,7 +1709,7 @@ Makefile.pre: $(srcdir)/Makefile.pre.in config.status
 config.status:	$(srcdir)/configure
 	$(SHELL) $(srcdir)/configure $(CONFIG_ARGS)
 
-.PRECIOUS: config.status $(BUILDPYTHON) Makefile Makefile.pre
+.PRECIOUS:  $(BUILDPYTHON) Makefile Makefile.pre
 
 # Some make's put the object file in the current directory
 .c.o:
@@ -1730,6 +1745,7 @@ tags::
 	ctags -w $(srcdir)/Include/*.h $(srcdir)/Include/cpython/*.h $(srcdir)/Include/internal/*.h
 	for i in $(SRCDIRS); do ctags -f tags -w -a $(srcdir)/$$i/*.[ch]; done
 	ctags -f tags -w -a $(srcdir)/Modules/_ctypes/*.[ch]
+	find $(srcdir)/Lib -type f -name "*.py" -not -name "test_*.py" -not -path "*/test/*" -not -path "*/tests/*" -not -path "*/*_test/*" | ctags -f tags -w -a -L -
 	LC_ALL=C sort -o tags tags
 
 # Create a tags file for GNU Emacs
@@ -1737,6 +1753,8 @@ TAGS::
 	cd $(srcdir); \
 	etags Include/*.h Include/cpython/*.h Include/internal/*.h; \
 	for i in $(SRCDIRS); do etags -a $$i/*.[ch]; done
+	etags -a $(srcdir)/Modules/_ctypes/*.[ch]
+	find $(srcdir)/Lib -type f -name "*.py" -not -name "test_*.py" -not -path "*/test/*" -not -path "*/tests/*" -not -path "*/*_test/*" | etags - -a
 
 # Sanitation targets -- clean leaves libraries, executables and tags
 # files, which clobber removes as well
