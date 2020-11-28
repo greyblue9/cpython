@@ -10,6 +10,40 @@ The objects used by the site module to add custom builtins.
 
 import sys
 
+for module_name_to_import in ('itertools', 'functools', 'pythonrc'):
+  module_object = None
+  if sys.modules.__contains__(module_name_to_import):
+    module_object = sys.modules[module_name_to_import]
+  elif module_name_to_import not in ('pythonrc',):
+    try:
+      module_object = __import__(module_name_to_import)
+    except ImportError as ierr:
+      sys.stderr.write(bytes(repr(ierr), 'ISO-8859-1'))
+
+  if not module_object:
+    continue
+
+  for mod_key in ('__main__', '__builtin__', 'builtins'):
+    if sys.modules.__contains__(mod_key):
+      setattr(sys.modules[mod_key], module_name_to_import, module_object)
+      break
+
+
+
+def cstr(obj):
+    _Str_t = type('')
+    if isinstance(obj, _Str_t):
+        return obj
+    try:
+        return _Str_t.__new__(_Str_t, obj, 'utf-8')
+    except UnicodeDecodeError:
+        return _Str_t.__new__(_Str_t, obj, 'iso-8859-1')
+
+for mod_key in ('__main__', '__builtin__', 'builtins'):
+    if sys.modules.__contains__(mod_key):
+        setattr(sys.modules[mod_key], 'cstr', cstr)
+        break
+
 class Quitter(object):
     def __init__(self, name, eof):
         self.name = name

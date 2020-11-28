@@ -738,3 +738,9 @@ def main():
 
 if __name__=='__main__':
     main()
+else:
+  def trace(*args, **kwargs):
+    import sys
+    t = Trace(ignoredirs=[sys.base_prefix, sys.base_exec_prefix,], trace=1, count=1)
+    return t.run(*args, **kwargs)
+#

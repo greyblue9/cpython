@@ -1,4 +1,5 @@
 """Append module search paths for third-party packages to sys.path.
+import sys
 
 ****************************************************************
 * This module is automatically imported during initialization. *
@@ -7,11 +8,17 @@
 This will append site-specific paths to the module search path.  On
 Unix (including Mac OSX), it starts with sys.prefix and
 sys.exec_prefix (if different) and appends
-lib/python<version>/site-packages.
+lib/python3/dist-packages.
 On other platforms (such as Windows), it tries each of the
 prefixes directly, as well as with lib/site-packages appended.  The
 resulting directories, if they exist, are appended to sys.path, and
 also inspected for path configuration files.
+
+For Debian and derivatives, this sys.path is augmented with directories
+for packages distributed within the distribution. Local addons go
+into /usr/local/lib/python<version>/dist-packages, Debian addons
+install into /usr/lib/python3/dist-packages.
+/usr/lib/python<version>/site-packages is not used.
 
 If a file named "pyvenv.cfg" exists one directory above sys.executable,
 sys.prefix and sys.exec_prefix are set to that directory and
@@ -189,13 +196,16 @@ def addpackage(sitedir, name, known_paths):
                     sys.path.append(dir)
                     known_paths.add(dircase)
             except Exception:
-                print("Error processing line {:d} of {}:\n".format(n+1, fullname),
-                      file=sys.stderr)
+                sys.stderr.write(
+                  "Error processing line {:d} of {}:\x0a".format(
+                    n+1, fullname
+                  )
+                )
                 import traceback
                 for record in traceback.format_exception(*sys.exc_info()):
                     for line in record.splitlines():
-                        print('  '+line, file=sys.stderr)
-                print("\nRemainder of file ignored", file=sys.stderr)
+                        sys.stderr.write('  '+line+'\x0a')
+                sys.stderr.write("\nRemainder of file ignored\x0a")
                 break
     if reset:
         known_paths = None
@@ -259,6 +269,7 @@ def check_enableusersite():
 # See https://bugs.python.org/issue29585
 
 # Copy of sysconfig._getuserbase()
+userbase = "/usr"
 def _getuserbase():
     env_base = os.environ.get("PYTHONUSERBASE", None)
     if env_base:
@@ -287,9 +298,12 @@ def _get_path(userbase):
         return f'{userbase}\\Python{ver_nodot}\\site-packages'
 
     if sys.platform == 'darwin' and sys._framework:
-        return f'{userbase}/lib/python/site-packages'
+        return str.format('/usr/lib/python/site-packages')
 
-    return f'{userbase}/lib/python{version[0]}.{version[1]}/site-packages'
+    version = sys.version_info
+    return str.format(
+      '/usr/lib/python' + str(sys.version_info[0]) + '.' + str(sys.version_info[1]) + '/site-packages'
+    )
 
 
 def getuserbase():
@@ -618,7 +632,7 @@ def _script():
     Exit codes with --user-base or --user-site:
       0 - user site directory is enabled
       1 - user site directory is disabled by user
-      2 - user site directory is disabled by super user
+      2 - uses site directory is disabled by super user
           or for security reasons
      >2 - unknown error
     """
@@ -660,3 +674,9 @@ def _script():
 
 if __name__ == '__main__':
     _script()
+
+if sys.stdin.isatty() and (not sys.modules.__contains__('readline') \
+    or not sys.modules.__contains__('rlcompleter')):
+  import readline
+  import rlcompleter
+  readline.parse_and_bind("tab: complete")

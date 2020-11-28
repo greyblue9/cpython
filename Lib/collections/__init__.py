@@ -27,6 +27,36 @@ __all__ = [
 ]
 
 import _collections_abc
+ABCMeta = _collections_abc.ABCMeta
+AsyncGenerator = _collections_abc.AsyncGenerator
+AsyncIterable = _collections_abc.AsyncIterable
+AsyncIterator = _collections_abc.AsyncIterator
+Awaitable = _collections_abc.Awaitable
+ByteString = _collections_abc.ByteString
+Callable = _collections_abc.Callable
+Collection = _collections_abc.Collection
+Container = _collections_abc.Container
+Coroutine = _collections_abc.Coroutine
+Generator = _collections_abc.Generator
+Hashable = _collections_abc.Hashable
+ItemsView = _collections_abc.ItemsView
+Iterable = _collections_abc.Iterable
+Iterator = _collections_abc.Iterator
+KeysView = _collections_abc.KeysView
+Mapping = _collections_abc.Mapping
+MappingView = _collections_abc.MappingView
+MutableMapping = _collections_abc.MutableMapping
+MutableSequence = _collections_abc.MutableSequence
+MutableSet = _collections_abc.MutableSet
+Reversible = _collections_abc.Reversible
+Sequence = _collections_abc.Sequence
+Set = _collections_abc.Set
+Sized = _collections_abc.Sized
+ValuesView = _collections_abc.ValuesView
+
+
+from operator import itemgetter as _itemgetter, eq as _eq
+from keyword import iskeyword as _iskeyword
 import sys as _sys
 
 from itertools import chain as _chain

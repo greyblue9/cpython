@@ -70,7 +70,7 @@ else:
         """
 
         if sys.platform == 'linux':
-            _dir_candidates = ['/dev/shm']
+            _dir_candidates = ['/tm/tmp']
         else:
             _dir_candidates = []
 

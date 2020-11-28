@@ -249,8 +249,7 @@ class install(Command):
 
         if self.user and (self.prefix or self.exec_prefix or self.home or
                 self.install_base or self.install_platbase):
-            raise DistutilsOptionError("can't combine user with prefix, "
-                                       "exec_prefix/home, or install_(plat)base")
+            self.user = False
 
         # Next, stuff that's wrong (or dubious) only on certain platforms.
         if os.name != "posix":
