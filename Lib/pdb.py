@@ -1003,6 +1003,25 @@ class Pdb(bdb.Bdb, cmd.Cmd):
         function).
         """
         self.set_step()
+        first = None
+        last = None
+        if self.lineno is None:
+            first = max(1, self.curframe.f_lineno - 5)
+        else:
+            first = self.lineno + 1
+        if last is None:
+            last = first + 10
+        filename = self.curframe.f_code.co_filename
+        breaklist = self.get_file_breaks(filename)
+        try:
+            lines = linecache.getlines(filename, self.curframe.f_globals)
+            self._print_lines(lines[first-1:last], first, breaklist,
+                              self.curframe)
+            self.lineno = min(last, len(lines))
+            if len(lines) < last:
+                self.message('[EOF]')
+        except KeyboardInterrupt:
+            pass
         return 1
     do_s = do_step
 
@@ -1012,6 +1031,25 @@ class Pdb(bdb.Bdb, cmd.Cmd):
         is reached or it returns.
         """
         self.set_next(self.curframe)
+        first = None
+        last = None
+        if self.lineno is None:
+            first = max(1, self.curframe.f_lineno - 5)
+        else:
+            first = self.lineno + 1
+        if last is None:
+            last = first + 10
+        filename = self.curframe.f_code.co_filename
+        breaklist = self.get_file_breaks(filename)
+        try:
+            lines = linecache.getlines(filename, self.curframe.f_globals)
+            self._print_lines(lines[first-1:last], first, breaklist,
+                              self.curframe)
+            self.lineno = min(last, len(lines))
+            if len(lines) < last:
+                self.message('[EOF]')
+        except KeyboardInterrupt:
+            pass
         return 1
     do_n = do_next
 

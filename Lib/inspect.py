@@ -351,7 +351,7 @@ def getmembers(object, predicate=None):
             # handle the duplicate key
             if key in processed:
                 raise AttributeError
-        except AttributeError:
+        except (AttributeError, ValueError):
             for base in mro:
                 if key in base.__dict__:
                     value = base.__dict__[key]
@@ -651,15 +651,60 @@ def cleandoc(doc):
             lines.pop(0)
         return '\n'.join(lines)
 
+def lookup_module(object):
+    object_mod = None
+    from types import ModuleType
+
+    if isinstance(object, ModuleType):
+      object_mod = object
+    elif hasattr(object, '__module__'):
+      if isinstance(object.__module__, str):
+        object_mod = sys.modules[object.__module__]
+      elif isinstance(object.__module__, ModuleType):
+        object_mod = object.__module__
+      else:
+        raise TypeError(
+          'Unexpected type for object(%s.%s).__module__ value: %s.%s' % (
+            type(object).__module__, type(object).__qualname__,
+            type(object.__module__).__module__,
+            type(object.__module__).__qualname__,
+          )
+        )
+    elif hasattr(object, '__init__') \
+     and hasattr(object.__init__, '__module__'):
+      object_mod = sys.modules[object.__init__.__module__]
+    elif not isinstance(object, type):
+      object_mod = sys.modules[type(object).__module__]
+
+    if not object_mod:
+      raise NotImplementedError(
+        'Don\'t know how to find module for object of type \'%s.%s\'.' % (
+          type(object).__module__, type(object).__qualname__
+        )
+      )
+    return object_mod
+
+_cache_regex = __import__('re').compile(
+  '^(.+?)(\\.cpython[^/.]*|)((\\.[sp]y?)[co])$'
+)
+
 def getfile(object):
     """Work out which source or compiled file an object was defined in."""
+    orig_object = object
+
     if ismodule(object):
         if getattr(object, '__file__', None):
             return object.__file__
+        loader = getattr(object, '__loader__', None)
+        path = getattr(loader, 'path', None)
+        if path is not None:
+            return path
         raise TypeError('{!r} is a built-in module'.format(object))
     if isclass(object):
         if hasattr(object, '__module__'):
             module = sys.modules.get(object.__module__)
+            if module is not None:
+                return getfile(module)
             if getattr(module, '__file__', None):
                 return module.__file__
         raise TypeError('{!r} is a built-in class'.format(object))
@@ -671,11 +716,49 @@ def getfile(object):
         object = object.tb_frame
     if isframe(object):
         object = object.f_code
+
+    if iscode(object) and type(object.co_filename) is str and \
+       object.co_filename.startswith('<'):
+        object_mod = lookup_module(orig_object)
+        if hasattr(object_mod, '__file__'):
+            object_mod_file = object_mod.__file__
+        elif object_mod.__spec__ and object_mod.__spec__.origin:
+            object_mod_file = next(iter(object_mod.__spec__.origin))
+        else:
+            mod_funcs = list(
+              dict(getmembers(object_mod, isfunction)).values()
+            )
+            if mod_funcs:
+              import collections
+              mod_func_top_files = collections.Counter(
+                [x.__code__.co_filename for x in mod_funcs]
+              )
+              object_mod_file = next(iter(mod_func_top_files))
+
+            if not object_mod_file:
+              from os.path import split, dirname, join
+              cached = object_mod.__spec__.cached
+              pieces = (dirname(split(cached)[0]), split(cached)[1]) \
+                if cached else ('', '')
+              matcher = _cache_regex.match(pieces[1])
+              object_mod_file = join(
+                pieces[0],
+                ''.join((matcher.group(1), matcher.group(4)))
+              ) if matcher else None
+        if object_mod_file:
+            return object_mod_file
+        # return None
     if iscode(object):
         return object.co_filename
+    if callable(object) and \
+        not isinstance(object, type) and \
+        not type(object).__module__ in ('builtins', '__builtin__'):
+      return getfile(object.__class__.__call__)
+    if not isinstance(object, type) and object.__class__ != object:
+      return getfile(object.__class__)
     raise TypeError('module, class, method, function, traceback, frame, or '
-                    'code object was expected, got {}'.format(
-                    type(object).__name__))
+                    'code object was expected, got {}: {}'.format(
+                    type(object).__name__, str(object)))
 
 def getmodulename(path):
     """Return the module name for a given file, or None."""
@@ -687,6 +770,44 @@ def getmodulename(path):
     for neglen, suffix in suffixes:
         if fname.endswith(suffix):
             return fname[:neglen]
+
+    from itertools import chain
+    _mod_pairs = chain(
+        ('__main__', sys.modules['__main__']),
+        * sys.modules.items()
+    )
+    z = None
+
+    mod_pairs = [
+      m if hasattr((z := m), '__iter__') and len(m) == 2 \
+        else (m.__name__, m) \
+          if isinstance(m, types.ModuleType)
+          else ('', None)
+        for m in _mod_pairs
+    ]
+    mod_pairs = list(filter(lambda mp: mp[0] and mp[1], mod_pairs))
+
+    for mod_name, mod_object in mod_pairs:
+      try:
+        if not isinstance(mod_object, types.ModuleType):
+           continue
+        if getattr(getattr(
+           mod_object, '__loader__', None), '_ORIGIN', None) \
+           in ('built-in', 'frozen'):
+             continue
+        if hasattr(mod_object, '__path__') and \
+           hasattr(mod_object.__path__, '__iter__'):
+           file_names = list(
+             f'{p}/__init__.py' for p in mod_object.__path__
+           )
+        else:
+          file_names = getfile(mod_object)
+        for mod_file_name in file_names:
+            if os.path.exists(mod_file_name) and os.path.exists(path):
+                if mod_file_name and os.path.samefile(path, mod_file_name):
+                    return mod_name
+      except TypeError:
+        continue
     return None
 
 def getsourcefile(object):
@@ -695,7 +816,8 @@ def getsourcefile(object):
     """
     filename = getfile(object)
     all_bytecode_suffixes = importlib.machinery.DEBUG_BYTECODE_SUFFIXES[:]
-    all_bytecode_suffixes += importlib.machinery.OPTIMIZED_BYTECODE_SUFFIXES[:]
+    all_bytecode_suffixes += \
+      importlib.machinery.OPTIMIZED_BYTECODE_SUFFIXES[:]
     if any(filename.endswith(s) for s in all_bytecode_suffixes):
         filename = (os.path.splitext(filename)[0] +
                     importlib.machinery.SOURCE_SUFFIXES[0])
@@ -840,6 +962,12 @@ def findsource(object):
             if pat.match(lines[lnum]): break
             lnum = lnum - 1
         return lines, lnum
+
+    if callable(object) and \
+        not isinstance(object, type) and \
+        not type(object).__module__ in ('builtins', '__builtin__'):
+      return findsource(object.__class__.__call__)
+    return findsource(object.__class__)
     raise OSError('could not find code object')
 
 def getcomments(object):
@@ -1557,7 +1685,7 @@ def _shadowed_dict(klass):
         except KeyError:
             pass
         else:
-            if not (type(class_dict) is types.GetSetDescriptorType and
+            if not (isinstance(class_dict, types.GetSetDescriptorType) and
                     class_dict.__name__ == "__dict__" and
                     class_dict.__objclass__ is entry):
                 return class_dict
@@ -1579,7 +1707,7 @@ def getattr_static(obj, attr, default=_sentinel):
         klass = type(obj)
         dict_attr = _shadowed_dict(klass)
         if (dict_attr is _sentinel or
-            type(dict_attr) is types.MemberDescriptorType):
+            isinstance(dict_attr, types.MemberDescriptorType)):
             instance_result = _check_instance(obj, attr)
     else:
         klass = obj
@@ -2366,7 +2494,7 @@ def _signature_from_callable(obj, *,
                 if (obj.__init__ is object.__init__ and
                     obj.__new__ is object.__new__):
                     # Return a signature of 'object' builtin.
-                    return sigcls.from_callable(object)
+                    return signature(object)
                 else:
                     raise ValueError(
                         'no signature found for builtin type {!r}'.format(obj))
@@ -2959,7 +3087,7 @@ class Signature:
                         arguments[param.name] = tuple(values)
                         break
 
-                    if param.name in kwargs and param.kind != _POSITIONAL_ONLY:
+                    if param.name in kwargs:
                         raise TypeError(
                             'multiple values for argument {arg!r}'.format(
                                 arg=param.name)) from None
@@ -3117,7 +3245,7 @@ def _main():
                                                     type(exc).__name__,
                                                     exc)
         print(msg, file=sys.stderr)
-        sys.exit(2)
+        exit(2)
 
     if has_attrs:
         parts = attrs.split(".")
@@ -3127,7 +3255,7 @@ def _main():
 
     if module.__name__ in sys.builtin_module_names:
         print("Can't get info for builtin modules.", file=sys.stderr)
-        sys.exit(1)
+        exit(1)
 
     if args.details:
         print('Target: {}'.format(target))
